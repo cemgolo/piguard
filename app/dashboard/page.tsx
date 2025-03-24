@@ -6,6 +6,7 @@ import { useDemo } from "@/app/lib/DemoContext";
 import { MapPin, Navigation } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import dynamic from "next/dynamic";
+import { GPSData } from "@/types/gps";
 
 // Dynamically import map components to avoid SSR issues
 const MapContainer = dynamic(
@@ -110,10 +111,12 @@ const generateRealisticPath = (count: number) => {
 export default function DashboardPage() {
   const { isDemoMode } = useDemo();
   const [leafletLoaded, setLeafletLoaded] = useState(false);
-  const [gpsData, setGpsData] = useState<any[]>([]);
+  const [gpsData, setGpsData] = useState<GPSData[]>([]);
   const [showPath, setShowPath] = useState(true);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   
-  // Load Leaflet CSS
+  // Load Leaflet CSS and fetch data
   useEffect(() => {
     const loadLeafletCSS = async () => {
       await import('leaflet/dist/leaflet.css');
@@ -122,17 +125,38 @@ export default function DashboardPage() {
     
     loadLeafletCSS();
     
-    // Generate mock GPS data for demo
-    const generateData = () => {
-      setGpsData(generateRealisticPath(30));
+    const fetchData = async () => {
+      try {
+        setIsLoading(true);
+        setError(null);
+        
+        // Fetch GPS data
+        const gpsResponse = await fetch('/api/robot/gps');
+        if (!gpsResponse.ok) {
+          throw new Error('Failed to fetch GPS data');
+        }
+        const gpsData = await gpsResponse.json();
+        setGpsData(gpsData);
+        
+        // Update data periodically
+        const interval = setInterval(async () => {
+          const newGpsResponse = await fetch('/api/robot/gps');
+          if (newGpsResponse.ok) {
+            const newGpsData = await newGpsResponse.json();
+            setGpsData(newGpsData);
+          }
+        }, 5000); // Update every 5 seconds
+        
+        return () => clearInterval(interval);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'An error occurred');
+        console.error('Error fetching data:', err);
+      } finally {
+        setIsLoading(false);
+      }
     };
     
-    generateData();
-    
-    // Update data periodically
-    const interval = setInterval(generateData, 60000);
-    
-    return () => clearInterval(interval);
+    fetchData();
   }, []);
 
   // In a real app, we would fetch this data from the Raspberry Pi API
@@ -191,104 +215,119 @@ export default function DashboardPage() {
         </p>
       </div>
 
-      {/* Metrics Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {metrics.map((metric, i) => (
-          <Card key={i}>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-gray-500">
-                {metric.title}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{metric.value}</div>
-              <div
-                className={`text-xs font-medium mt-2 ${
-                  metric.changeType === "increase"
-                    ? "text-red-600"
-                    : "text-green-600"
-                }`}
-              >
-                {metric.change} since last hour
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded relative" role="alert">
+          <strong className="font-bold">Error: </strong>
+          <span className="block sm:inline">{error}</span>
+        </div>
+      )}
 
-      {/* Status Summary and Location Map */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Status Summary */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Status Summary</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {statusItems.map((item, i) => (
-                <div key={i} className="flex justify-between items-center border-b pb-2 last:border-0">
-                  <span className="text-gray-500">{item.label}</span>
-                  <span className="font-medium">{item.value}</span>
+      {isLoading ? (
+        <div className="flex justify-center items-center h-64">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900"></div>
+        </div>
+      ) : (
+        <>
+          {/* Metrics Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            {metrics.map((metric, i) => (
+              <Card key={i}>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-gray-500">
+                    {metric.title}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{metric.value}</div>
+                  <div
+                    className={`text-xs font-medium mt-2 ${
+                      metric.changeType === "increase"
+                        ? "text-red-600"
+                        : "text-green-600"
+                    }`}
+                  >
+                    {metric.change} since last hour
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+
+          {/* Status Summary and Location Map */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Status Summary */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Status Summary</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  {statusItems.map((item, i) => (
+                    <div key={i} className="flex justify-between items-center border-b pb-2 last:border-0">
+                      <span className="text-gray-500">{item.label}</span>
+                      <span className="font-medium">{item.value}</span>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+              </CardContent>
+            </Card>
 
-        {/* Map */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle>Robot Location</CardTitle>
-            <Button 
-              variant="outline" 
-              size="sm"
-              onClick={() => setShowPath(!showPath)}
-            >
-              {showPath ? "Hide Path" : "Show Path"}
-            </Button>
-          </CardHeader>
-          <CardContent className="p-0 overflow-hidden rounded-b-lg">
-            {leafletLoaded && (
-              <div className="h-[300px] w-full">
-                <MarkerIcon />
-                <MapContainer 
-                  center={mapCenter as [number, number]} 
-                  zoom={15} 
-                  style={{ height: '100%', width: '100%' }}
+            {/* Map */}
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <CardTitle>Robot Location</CardTitle>
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => setShowPath(!showPath)}
                 >
-                  <TileLayer
-                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                  />
-                  
-                  {currentPosition && (
-                    <Marker position={[currentPosition.latitude, currentPosition.longitude]}>
-                      <Popup>
-                        <div className="text-sm">
-                          <div className="font-semibold mb-1">Current Location</div>
-                          <div>Latitude: {currentPosition.latitude.toFixed(6)}</div>
-                          <div>Longitude: {currentPosition.longitude.toFixed(6)}</div>
-                          <div>Altitude: {currentPosition.altitude.toFixed(1)}m</div>
-                          <div>Updated: {currentPosition.time}</div>
-                        </div>
-                      </Popup>
-                    </Marker>
-                  )}
-                  
-                  {showPath && pathPositions.length > 1 && (
-                    <Polyline 
-                      positions={pathPositions as [number, number][]} 
-                      color="blue" 
-                      weight={3}
-                      opacity={0.7}
-                    />
-                  )}
-                </MapContainer>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+                  {showPath ? "Hide Path" : "Show Path"}
+                </Button>
+              </CardHeader>
+              <CardContent className="p-0 overflow-hidden rounded-b-lg">
+                {leafletLoaded && (
+                  <div className="h-[300px] w-full">
+                    <MarkerIcon />
+                    <MapContainer 
+                      center={mapCenter as [number, number]} 
+                      zoom={15} 
+                      style={{ height: '100%', width: '100%' }}
+                    >
+                      <TileLayer
+                        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                      />
+                      
+                      {currentPosition && (
+                        <Marker position={[currentPosition.latitude, currentPosition.longitude]}>
+                          <Popup>
+                            <div className="text-sm">
+                              <div className="font-semibold mb-1">Current Location</div>
+                              <div>Latitude: {currentPosition.latitude.toFixed(6)}</div>
+                              <div>Longitude: {currentPosition.longitude.toFixed(6)}</div>
+                              <div>Altitude: {currentPosition.altitude.toFixed(1)}m</div>
+                              <div>Updated: {currentPosition.time}</div>
+                            </div>
+                          </Popup>
+                        </Marker>
+                      )}
+                      
+                      {showPath && pathPositions.length > 1 && (
+                        <Polyline 
+                          positions={pathPositions as [number, number][]} 
+                          color="blue" 
+                          weight={3}
+                          opacity={0.7}
+                        />
+                      )}
+                    </MapContainer>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </>
+      )}
     </div>
   );
 } 
