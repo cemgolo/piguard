@@ -29,6 +29,7 @@ model User {
   accounts      Account[]
   sessions      Session[]
   commands      RobotCommand[]
+  assignedAlerts AnomalyAlert[] @relation("UserAssignedAlerts")
 }
 
 model Account {
@@ -99,7 +100,56 @@ model RaspberryPiConfig {
   category String @default("general")
 }
 
-// Enum definitions
+// Anomali Tespiti ve Kamera Modelleri
+model CameraImage {
+  id              String    @id @default(cuid())
+  imageUrl        String    // S3 veya başka bir depolama hizmetindeki URL
+  thumbnailUrl    String?   // Küçük önizleme için URL (isteğe bağlı)
+  capturedAt      DateTime  @default(now())
+  processed       Boolean   @default(false)
+  detections      Detection[]
+  gpsLatitude     Float?
+  gpsLongitude    Float?
+  robotStatus     Json?     // Robot durum bilgisi (JSON olarak saklanır)
+}
+
+model Detection {
+  id              String    @id @default(cuid())
+  cameraImage     CameraImage @relation(fields: [cameraImageId], references: [id], onDelete: Cascade)
+  cameraImageId   String
+  detectionType   DetectionType
+  confidence      Float
+  boundingBox     Json?     // {x, y, width, height} şeklinde JSON
+  detectedAt      DateTime  @default(now())
+  isFalsePositive Boolean   @default(false)
+  notes           String?   // Tespit hakkında notlar
+}
+
+model AnomalyAlert {
+  id              String    @id @default(cuid())
+  title           String
+  description     String?
+  severity        AlertSeverity
+  status          AlertStatus @default(NEW)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  resolvedAt      DateTime?
+  assignedUserId  String?
+  assignedUser    User?     @relation("UserAssignedAlerts", fields: [assignedUserId], references: [id])
+  gpsLatitude     Float?
+  gpsLongitude    Float?
+  relatedImages   AnomalyAlertImage[]
+}
+
+model AnomalyAlertImage {
+  id              String    @id @default(cuid())
+  anomalyAlert    AnomalyAlert @relation(fields: [anomalyAlertId], references: [id], onDelete: Cascade)
+  anomalyAlertId  String
+  imageUrl        String
+  addedAt         DateTime  @default(now())
+}
+
+// Enum Tanımlamaları
 enum Role {
   USER
   ADMIN
@@ -116,4 +166,29 @@ enum CommandStatus {
   PENDING
   EXECUTED
   FAILED
+}
+
+enum DetectionType {
+  PERSON
+  VEHICLE
+  ANIMAL
+  FIRE
+  SMOKE
+  UNKNOWN
+  CUSTOM
+}
+
+enum AlertSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum AlertStatus {
+  NEW
+  ACKNOWLEDGED
+  IN_PROGRESS
+  RESOLVED
+  FALSE_ALARM
 }
